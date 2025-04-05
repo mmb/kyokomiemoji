@@ -12,6 +12,10 @@ import (
 
 //go:generate generateEmojiCodeMap -pkg emoji -o emoji_codemap.go
 
+type wrapper interface {
+	Wrap(alias string, code string) string
+}
+
 // Replace Padding character for emoji.
 var (
 	ReplacePadding = " "
@@ -53,10 +57,21 @@ var flagRegexp = regexp.MustCompile(":flag-([a-z]{2}):")
 func Emojize(x string) string {
 	str, ok := emojiCode()[x]
 	if ok {
-		return str + ReplacePadding
+		return str
 	}
 	if match := flagRegexp.FindStringSubmatch(x); len(match) == 2 {
 		return regionalIndicator(match[1][0]) + regionalIndicator(match[1][1])
+	}
+	return x
+}
+
+func EmojizeWithWrapper(x string, wrapper wrapper) string {
+	str, ok := emojiCode()[x]
+	if ok {
+		return wrapper.Wrap(x, str)
+	}
+	if match := flagRegexp.FindStringSubmatch(x); len(match) == 2 {
+		return wrapper.Wrap(x, regionalIndicator(match[1][0])+regionalIndicator(match[1][1]))
 	}
 	return x
 }
@@ -89,6 +104,29 @@ func replaceEmoji(input *bytes.Buffer) string {
 	}
 }
 
+func replaceEmojiWithWrapper(input *bytes.Buffer, wrapper wrapper) string {
+	emoji := bytes.NewBufferString(":")
+	for {
+		i, _, err := input.ReadRune()
+		if err != nil {
+			// not replace
+			return emoji.String()
+		}
+
+		if i == ':' && emoji.Len() == 1 {
+			return emoji.String() + replaceEmojiWithWrapper(input, wrapper)
+		}
+
+		emoji.WriteRune(i)
+		switch {
+		case unicode.IsSpace(i):
+			return emoji.String()
+		case i == ':':
+			return EmojizeWithWrapper(emoji.String(), wrapper)
+		}
+	}
+}
+
 func compile(x string) string {
 	if x == "" {
 		return ""
@@ -107,6 +145,29 @@ func compile(x string) string {
 			output.WriteRune(i)
 		case ':':
 			output.WriteString(replaceEmoji(input))
+		}
+	}
+	return output.String()
+}
+
+func compileWithWrapper(x string, wrapper wrapper) string {
+	if x == "" {
+		return ""
+	}
+
+	input := bytes.NewBufferString(x)
+	output := bytes.NewBufferString("")
+
+	for {
+		i, _, err := input.ReadRune()
+		if err != nil {
+			break
+		}
+		switch i {
+		default:
+			output.WriteRune(i)
+		case ':':
+			output.WriteString(replaceEmojiWithWrapper(input, wrapper))
 		}
 	}
 	return output.String()
@@ -145,6 +206,10 @@ func Fprintf(w io.Writer, format string, a ...interface{}) (int, error) {
 // Sprint is fmt.Sprint which supports emoji
 func Sprint(a ...interface{}) string {
 	return compile(fmt.Sprint(a...))
+}
+
+func SprintWithWrapper(wrapper wrapper, a ...interface{}) string {
+	return compileWithWrapper(fmt.Sprint(a...), wrapper)
 }
 
 // Sprintf is fmt.Sprintf which supports emoji
