@@ -7,14 +7,26 @@ jobs:
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          check-latest: true
       - run: go version
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v9
         with:
           version: latest
       - run: go test -v -coverprofile=profile.cov ./...
+      - name: build and vet cmd module
+        working-directory: cmd
+        env:
+          # cmd module requires a newer Go than root go.mod; allow toolchain auto-download
+          # (setup-go v6 sets GOTOOLCHAIN=local by default)
+          GOTOOLCHAIN: auto
+        run: |
+          go build -o /dev/null ./generateEmojiCodeMap
+          go vet ./...
       - uses: shogo82148/actions-goveralls@v1
         with:
           path-to-profile: profile.cov
